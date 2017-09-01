@@ -478,15 +478,30 @@ class IslandoraMultiBatchObject extends IslandoraBatchObject {
                 // This will handle all cases, except ZIP.
                 $fileurl = islandora_multi_importer_remote_file_get(trim($this->objectInfo['data'][$method[1]]));
                 if ($fileurl) {
-                  $datastreams[$dsid] = array(
+                  if ($dsid == 'TN') {
+                    $filename = drupal_basename($fileurl);
+                    $dummy = explode('.', $filename);
+                    $newfilename = $dummy[0] . '_TN.jpg';
+                    $public_path = '/var/www/drupal7/sites/default/files/';
+                    $cmd = 'convert ' . $public_path  . $filename . ' -resize 200x ' . $public_path . $newfilename;
+                    shell_exec($cmd);
+                    $datastreams[$dsid] = array(
+                    'dsid' => $dsid,
+                    'label' => "$dsid datastream",
+                    'mimetype' => $this->getMimetype(drupal_basename($fileurl)),
+                    'datastream_file' => 'public://' . $newfilename,
+                    'filename' => drupal_basename($fileurl),
+                    'control_group' => 'M',
+                    );
+                  } else {
+                    $datastreams[$dsid] = array(
                     'dsid' => $dsid,
                     'label' => "$dsid datastream",
                     'mimetype' => $this->getMimetype(drupal_basename($fileurl)),
                     'datastream_file' => $fileurl,
                     'filename' => drupal_basename($fileurl),
                     'control_group' => 'M',
-                  // 'file' => $file,.
-                  );
+                    );
                 }
               }
               break;
