@@ -195,98 +195,143 @@ class IslandoraMultiBatch extends IslandoraBatchPreprocessor {
     foreach ($file_data_all['data'] as $index => $row) {
       // Each row will be an object.
       $objectInfo = array();
-      $objectInfo['cmodel'] = trim($row[$this->parameters['cmodel_source_field_index']]);
+      $objectInfo['cmodel'] = trim($row[$this->parameters['cmodel_source_field_index']]); 
       // Lets start by grouping by parents, namespaces and generate pids
       // namespaces are inherited, so we just need to find collection
       // objects in parent pid column.
       $objectInfo['parent'] = trim($row[$this->parameters['object_maping']['parentmap_row']['parentmap']]);
+      $possiblePID = "";
+      
       $objectInfo['data'] = $row;
-      if (islandora_is_valid_pid($objectInfo['parent'])) {
-        // If valid PID, let's try to fetch a valid namespace for current cmodel
-        // we will store all this stuff in a temp hash to avoid hitting
-        // this again and again.
-        $objectInfo['parent_cmodel'] = $this->getParentCmodel($objectInfo['parent']);
-        if ($objectInfo['parent_cmodel']) {
-          $namespace = isset($namespace_hash[$objectInfo['parent']][$objectInfo['cmodel']])
-            ? $namespace_hash[$objectInfo['parent']][$objectInfo['cmodel']]
-            : $namespace_hash[$objectInfo['parent']][$objectInfo['cmodel']] = $this->determineNamespacebyPid($objectInfo['parent'], $objectInfo['cmodel']);
-          // This keeps the count so our pidcache is exact. Nice.
-          $namespace_count[$namespace] = isset($namespace_hash[$namespace]) ? $namespace_hash[$namespace]++ : 1;
-          $objectInfo['namespace'] = $namespace;
+       
+      // Autogeneration of PID is enabled and a PID column is provided
+      // both modes complement/limit each other
+      if (($this->parameters['object_maping']['pidmap_row']['pidtype']) != 1) {
+        // User provided PIDs are not required to respect collection policies, namespace, etc.
+        $possiblePID = trim($row[$this->parameters['object_maping']['pidmap_row']['pidmap']]);
+        if (!empty($possiblePID)) {
+          if (islandora_is_valid_pid($possiblePID)) {
+            $objectInfo['pid'] = $possiblePID;
+          }
         }
-        else {
-          // No parent cmodel, no object, can't create.
+        if (!isset($objectInfo['pid'])) {
           unset($objectInfo);
           $invalid = $invalid + array($index => $index);
         }
-      }
-      else {
-        // Means our parent object is a ROW index
-        // (referencing another row in the spreadsheet)
-        // So a different strategy is needed. We will need recurse
-        // until we find a non numeric parent.
-        $notPID = TRUE;
-        $parent = $objectInfo['parent'];
-        $parent_hash[$parent][$index] = $index;
-        $parentchilds = array();
-        if ((!isset($invalid[$index])) && (!isset($invalid[$parent]))) {
-          // Only traverse if we don't have this index or the parent one
-          // in the invalid register.
-          $objectInfo['parent_cmodel'] = $file_data_all['data'][$parent][$this->parameters['cmodel_source_field_index']];
-          $parentchilds = array();
-          $i = 0;
-          while ($notPID) {
-            $parentup = $file_data_all['data'][$parent][$this->parameters['object_maping']['parentmap_row']['parentmap']];
-
-            // Probably the simples approach for breaking a knott
-            // a.k.a infinite loop, invalidating the whole parentship
-            // chain for good.
-            $inaloop = array_key_exists($parentup, $parentchilds);
-            // If $inaloop === true means we already traversed this branch
-            // so we are in a loop and all our original child and it's
-            // parent objects are invalid.
-            if ($inaloop) {
-              $invalid = $invalid + $parentchilds;
-              unset($objectInfo);
-              $notPID = FALSE;
-              break;
-            }
-
-            $parentchilds[$parentup] = $parentup;
-            if (islandora_is_valid_pid(trim($parentup))) {
-              $namespace = isset($namespace_hash[$parentup][$objectInfo['cmodel']])
-                ? $namespace_hash[$parentup][$objectInfo['cmodel']]
-                : $namespace_hash[$parentup][$objectInfo['cmodel']] = $this->determineNamespacebyPid($parentup, $objectInfo['cmodel']
-              );
+      }  
+      // NO else statement because autogeneration is in fact the standard
+      // QUESTION IS: NO AUTOGENERATION MODE, COLUMN IS SET, PID IS EMPTY
+      // SHOULD WE TRY TO GENERATE IT AUTOMATICALLY ANYWAY?
+      
+      // Could happen that we already invalidated this row, so check if $objectInfo is
+      // is still around. New since allowing user provided PID.
+      if (isset($objectInfo)) {
+        if (islandora_is_valid_pid($objectInfo['parent'])) {
+        // If valid PID, let's try to fetch a valid namespace for current cmodel
+        // we will store all this stuff in a temp hash to avoid hitting
+        // this again and again.
+          $objectInfo['parent_cmodel'] = $this->getParentCmodel($objectInfo['parent']);
+          if ($objectInfo['parent_cmodel']) {
+            if (!isset($objectInfo['pid'])) { //Only do this if no PID assigned yet
+              $namespace = isset($namespace_hash[$objectInfo['parent']][$objectInfo['cmodel']])
+                ? $namespace_hash[$objectInfo['parent']][$objectInfo['cmodel']]
+                  : $namespace_hash[$objectInfo['parent']][$objectInfo['cmodel']] = $this->determineNamespacebyPid($objectInfo['parent'], $objectInfo['cmodel']);
               // This keeps the count so our pidcache is exact. Nice.
               $namespace_count[$namespace] = isset($namespace_hash[$namespace]) ? $namespace_hash[$namespace]++ : 1;
               $objectInfo['namespace'] = $namespace;
-              $notPID = FALSE;
-              break;
-            }
-            elseif (empty(trim($parent))) {
-
-              // We can't continue here
-              // means there must be an error
-              // This will fail for any child object that is
-              // child of any of these parents.
-              $invalid = $invalid + $parentchilds + array($objectInfo['parent'] => $objectInfo['parent']);
-              unset($objectInfo);
-              $notPID = FALSE;
             }
             else {
-              // This a simple accumulator, means all is well,
-              // parent is still an index.
-              $parent_hash[$parentup][$parent] = $parent;
+              // we have a PID but i still want my objectInfo['namespace']
+              // NO worries about checking if pidparts is in fact lenght of 2
+              // PID was checked for sanity a little bit earlier
+              $pidparts = explode(":", $objectInfo['pid']);
+              $objectInfo['namespace'] = $pidparts[0];
             }
-            $parent = $parentup;
+          }
+          else {
+            // No parent cmodel, no object, can't create.
+            unset($objectInfo);
+            $invalid = $invalid + array($index => $index);
           }
         }
         else {
-          unset($objectInfo);
+          // Means our parent object is a ROW index
+          // (referencing another row in the spreadsheet)
+          // So a different strategy is needed. We will need recurse
+          // until we find a non numeric parent.
+          $notPID = TRUE;
+          $parent = $objectInfo['parent'];
+          $parent_hash[$parent][$index] = $index;
+          $parentchilds = array();
+          if ((!isset($invalid[$index])) && (!isset($invalid[$parent]))) {
+            // Only traverse if we don't have this index or the parent one
+            // in the invalid register.
+            $objectInfo['parent_cmodel'] = $file_data_all['data'][$parent][$this->parameters['cmodel_source_field_index']];
+            $parentchilds = array();
+            $i = 0;
+            while ($notPID) {
+          
+              $parentup = $file_data_all['data'][$parent][$this->parameters['object_maping']['parentmap_row']['parentmap']];
+           
+              // Probably the simples approach for breaking a knott
+              // a.k.a infinite loop, invalidating the whole parentship
+              // chain for good.
+              $inaloop = isset($parentchilds[$parentup]);
+              // If $inaloop === true means we already traversed this branch
+              // so we are in a loop and all our original child and it's
+              // parent objects are invalid.
+              if ($inaloop) {
+                $invalid = $invalid + $parentchilds;
+                unset($objectInfo);
+                $notPID = FALSE;
+                break;
+              }
+
+              $parentchilds[$parentup] = $parentup;
+              if (islandora_is_valid_pid(trim($parentup))) {
+                if (!isset($objectInfo['pid'])) { //Only do this if no PID assigned yet
+                  $namespace = isset($namespace_hash[$parentup][$objectInfo['cmodel']])
+                    ? $namespace_hash[$parentup][$objectInfo['cmodel']]
+                    : $namespace_hash[$parentup][$objectInfo['cmodel']] = $this->determineNamespacebyPid($parentup, $objectInfo['cmodel']
+                  );
+                  // This keeps the count so our pidcache is exact. Nice.
+                  $namespace_count[$namespace] = isset($namespace_hash[$namespace]) ? $namespace_hash[$namespace]++ : 1;
+                  $objectInfo['namespace'] = $namespace;
+                } 
+                else {
+                  // we have a PID but i still want my objectInfo['namespace']
+                  // NO worries about checking if pidparts is in fact lenght of 2
+                  // PID was checked for sanity a little bit earlier
+                  $pidparts = explode(":", $objectInfo['pid']);
+                  $objectInfo['namespace'] = $pidparts[0];
+                }
+              
+                $notPID = FALSE;
+                break;
+              }
+              elseif (empty(trim($parent))) {
+
+                // We can't continue here
+                // means there must be an error
+                // This will fail for any child object that is
+                // child of any of these parents.
+                $invalid = $invalid + $parentchilds + array($objectInfo['parent'] => $objectInfo['parent']);
+                unset($objectInfo);
+                $notPID = FALSE;
+              }
+              else {
+                // This a simple accumulator, means all is well,
+                // parent is still an index.
+                $parent_hash[$parentup][$parent] = $parent;
+              }
+              $parent = $parentup;
+            }
+          }
+          else {
+            unset($objectInfo);
+          }
         }
       }
-
       if (isset($objectInfo) and !empty($objectInfo)) {
         $info[$index] = $objectInfo;
       }
@@ -295,7 +340,7 @@ class IslandoraMultiBatch extends IslandoraBatchPreprocessor {
     // TODO: optimize maybe?
     foreach ($info as $index => &$objectInfo) {
       $namespace = $objectInfo['namespace'];
-      $objectInfo['pid'] = isset($objectInfo['pid']) ? isset($objectInfo['pid']) : $this->getInternalIdentifier($namespace, $namespace_count[$namespace]);
+      $objectInfo['pid'] = isset($objectInfo['pid']) ? $objectInfo['pid'] : $this->getInternalIdentifier($namespace, $namespace_count[$namespace]);
       // Is this object parent of someone?
       if (isset($parent_hash[$objectInfo['parent']])) {
         $objectInfo['parent'] = $info[$objectInfo['parent']]['pid'];
@@ -344,6 +389,9 @@ class IslandoraMultiBatchObject extends IslandoraBatchObject {
     $this->objectInfo = $object_info;
     $this->resources = array();
     $this->preprocessorParameters = $preprocessor_parameters;
+    $objectINFO = fopen('/var/www/drupal7/myfolder/preprocessorParameters.txt', 'w');
+    fwrite($objectINFO, print_r($this->preprocessorParameters, true));
+    fclose($objectINFO);
   }
 
   /**
@@ -366,7 +414,9 @@ class IslandoraMultiBatchObject extends IslandoraBatchObject {
       $ds_uri = isset($ds['file']) ?
         $ds['file']->uri :
         $ds['datastream_file'];
+     
 
+ 
       $datastream = $this->constructDatastream($ds['dsid'], $ds['control_group']);
       $datastream->label = $ds['label'];
       $datastream->mimetype = $ds['mimetype'];
@@ -374,6 +424,13 @@ class IslandoraMultiBatchObject extends IslandoraBatchObject {
       $datastream->setContentFromFile($ds_uri);
       $this->ingestDatastream($datastream);
     }
+      $datastream = $this->constructDatastream('URL', 'M');
+      $datastream->label = 'URL';
+      $datastream->mimetype = 'text/html';
+      $key = array_search('url', $this->preprocessorParameters['data']['headers']);
+      $datastream->setContentFromString($this->objectInfo['data'][$key]);
+      $this->ingestDatastream($datastream);
+
     return ISLANDORA_BATCH_STATE__DONE;
   }
 
@@ -484,7 +541,7 @@ class IslandoraMultiBatchObject extends IslandoraBatchObject {
                     $newfilename = $dummy[0] . '_TN.jpg';
                     $public_path = '/var/www/drupal7/sites/default/files/';
                     $cmd = 'convert ' . $public_path  . $filename . ' -resize 200x ' . $public_path . $newfilename;
-                    shell_exec($cmd);
+		            shell_exec($cmd);
                     $datastreams[$dsid] = array(
                     'dsid' => $dsid,
                     'label' => "$dsid datastream",
@@ -493,7 +550,7 @@ class IslandoraMultiBatchObject extends IslandoraBatchObject {
                     'filename' => drupal_basename($fileurl),
                     'control_group' => 'M',
                     );
-                  } else {
+		            } else {
                     $datastreams[$dsid] = array(
                     'dsid' => $dsid,
                     'label' => "$dsid datastream",
@@ -502,11 +559,11 @@ class IslandoraMultiBatchObject extends IslandoraBatchObject {
                     'filename' => drupal_basename($fileurl),
                     'control_group' => 'M',
                     );
+		            }
                 }
               }
-              break;
 
-            default:
+              default:
               break;
 
           }; // End Switch
@@ -725,3 +782,4 @@ class IslandoraMultiBatchObject extends IslandoraBatchObject {
   }
 
 }
+
