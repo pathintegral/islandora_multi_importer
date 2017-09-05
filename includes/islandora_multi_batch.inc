@@ -389,9 +389,6 @@ class IslandoraMultiBatchObject extends IslandoraBatchObject {
     $this->objectInfo = $object_info;
     $this->resources = array();
     $this->preprocessorParameters = $preprocessor_parameters;
-    $objectINFO = fopen('/var/www/drupal7/myfolder/preprocessorParameters.txt', 'w');
-    fwrite($objectINFO, print_r($this->preprocessorParameters, true));
-    fclose($objectINFO);
   }
 
   /**
